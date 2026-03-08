@@ -14,4 +14,4 @@ def test_generate_loop_command_accepts_core_flags():
         ],
     )
     assert result.exit_code == 0
-    assert "[]" in result.stdout
+    assert "Prototype loop near Roanoke, VA" in result.stdout
