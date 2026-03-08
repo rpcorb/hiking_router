@@ -22,15 +22,6 @@ def generate_top_loops(query: dict) -> dict:
         tile_id=tile_id, bbox=bbox, force_live=force_live
     )
 
-    if osm_status == "miss":
-        osm_path = cache_root / "raw" / "osm" / f"{tile_id}.geojson"
-        osm_path.parent.mkdir(parents=True, exist_ok=True)
-        osm_path.write_text('{"type":"FeatureCollection","features":[]}')
-    if usgs_status == "miss":
-        usgs_path = cache_root / "raw" / "usgs" / f"{tile_id}.tif"
-        usgs_path.parent.mkdir(parents=True, exist_ok=True)
-        usgs_path.write_bytes(b"fake-dem")
-
     routes = [
         {
             "id": "prototype-roanoke-loop",
