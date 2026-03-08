@@ -8,6 +8,7 @@ from hiking_router.features.dem_sampling import (
     profile_from_dem_artifact,
     route_elevation_metrics,
 )
+from hiking_router.graph.osm_normalize import extract_segment_edges
 from hiking_router.models.response import QueryResponse
 from hiking_router.providers.fetcher import SourceUnavailableError
 from hiking_router.providers.fetcher import http_get_bytes
@@ -46,7 +47,7 @@ def generate_top_loops(query: dict) -> dict:
     )
 
     try:
-        _, osm_status = osm_client.fetch_trails(
+        osm_payload, osm_status = osm_client.fetch_trails(
             tile_id=tile_id,
             bbox=bbox,
             force_live=force_live,
@@ -75,11 +76,14 @@ def generate_top_loops(query: dict) -> dict:
     distance_miles = float(query.get("miles_min", 0))
     profile = profile_from_dem_artifact(dem_path)
     metrics = route_elevation_metrics(samples=profile, distance_miles=distance_miles)
+    edges = extract_segment_edges(osm_payload)
+    candidates_considered = max(1, len(edges))
+    route_name = f"Loop near {query.get('near', 'unknown')} ({len(edges)} segments)"
 
     routes = [
         {
             "id": "prototype-roanoke-loop",
-            "name": f"Prototype loop near {query.get('near', 'unknown')}",
+            "name": route_name,
             "distance_miles": distance_miles,
             "elevation_gain_ft": metrics["gain_ft"],
             "elevation_gain_per_mile_ft": metrics["gain_per_mile_ft"],
@@ -101,7 +105,7 @@ def generate_top_loops(query: dict) -> dict:
         meta={
             "engine_version": "v2-osm-usgs",
             "cache": {"osm": osm_status, "usgs": usgs_status},
-            "candidates_considered": len(routes),
+            "candidates_considered": candidates_considered,
             "routes_returned": len(routes),
             "reason": reason,
         },
