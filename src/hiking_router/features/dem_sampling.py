@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import rasterio
 
 def elevation_gain_from_profile(samples: list[float]) -> float:
     gain = 0.0
@@ -17,7 +18,17 @@ def route_elevation_metrics(samples: list[float], distance_miles: float) -> dict
 
 
 def profile_from_dem_artifact(dem_path: Path) -> list[float]:
-    """Derive a deterministic pseudo-profile from cached DEM bytes."""
+    """Derive a profile from a DEM raster, with byte fallback for invalid files."""
+    if dem_path.exists():
+        try:
+            with rasterio.open(dem_path) as src:
+                band = src.read(1)
+                values = [float(v) for v in band.flatten().tolist()]
+                if values:
+                    return values
+        except Exception:
+            pass
+
     data = dem_path.read_bytes() if dem_path.exists() else b""
     if not data:
         return [100.0, 100.0, 100.0]
