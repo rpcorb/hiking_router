@@ -1,4 +1,5 @@
 import json
+import os
 import socket
 import time
 from urllib.error import HTTPError, URLError
@@ -33,7 +34,13 @@ def parse_json_or_raise(payload: str) -> dict:
         raise FetchParseError("Invalid JSON payload") from exc
 
 
+def _network_disabled() -> bool:
+    return os.environ.get("HIKING_ROUTER_DISABLE_NETWORK") == "1"
+
+
 def http_get_text(url: str, timeout: int = 20, retries: int = 2) -> str:
+    if _network_disabled():
+        raise FetchTimeout("Network disabled by HIKING_ROUTER_DISABLE_NETWORK=1")
     last_error: Exception | None = None
     for attempt in range(retries + 1):
         try:
@@ -53,6 +60,8 @@ def http_get_text(url: str, timeout: int = 20, retries: int = 2) -> str:
 def http_post_form_text(
     url: str, form_data: dict[str, str], timeout: int = 20, retries: int = 2
 ) -> str:
+    if _network_disabled():
+        raise FetchTimeout("Network disabled by HIKING_ROUTER_DISABLE_NETWORK=1")
     body = urlencode(form_data).encode("utf-8")
     last_error: Exception | None = None
     for attempt in range(retries + 1):
@@ -73,6 +82,8 @@ def http_post_form_text(
 
 
 def http_get_bytes(url: str, timeout: int = 20, retries: int = 2) -> bytes:
+    if _network_disabled():
+        raise FetchTimeout("Network disabled by HIKING_ROUTER_DISABLE_NETWORK=1")
     last_error: Exception | None = None
     for attempt in range(retries + 1):
         try:
