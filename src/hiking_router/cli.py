@@ -1,3 +1,5 @@
+import json
+
 import typer
 from hiking_router.models.query import LoopQuery
 from hiking_router.use_cases.generate_loop import generate_top_loops
@@ -24,7 +26,17 @@ def generate_loop(
         difficulty=difficulty,
     )
     routes = generate_top_loops(query.model_dump())
-    print(routes)
+    response = {
+        "query": query.model_dump(),
+        "meta": {
+            "engine_version": "v2-osm-usgs",
+            "cache": {"osm": "miss", "usgs": "miss"},
+            "candidates_considered": len(routes),
+            "routes_returned": len(routes),
+        },
+        "routes": routes,
+    }
+    print(json.dumps(response))
 
 
 def main() -> None:
