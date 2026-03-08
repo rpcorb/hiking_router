@@ -11,11 +11,16 @@ def generate_top_loops(query: dict) -> dict:
     tile_id = "z10-290-391"
     bbox = (-80.0, 37.0, -79.0, 38.0)
 
+    force_live = bool(query.get("force_live", False))
     osm_client = OSMClient(cache_dir=cache_root)
     usgs_client = USGSClient(cache_dir=cache_root)
 
-    _, osm_status = osm_client.fetch_trails(tile_id=tile_id, bbox=bbox)
-    _, usgs_status = usgs_client.fetch_dem(tile_id=tile_id, bbox=bbox)
+    _, osm_status = osm_client.fetch_trails(
+        tile_id=tile_id, bbox=bbox, force_live=force_live
+    )
+    _, usgs_status = usgs_client.fetch_dem(
+        tile_id=tile_id, bbox=bbox, force_live=force_live
+    )
 
     if osm_status == "miss":
         osm_path = cache_root / "raw" / "osm" / f"{tile_id}.geojson"
@@ -42,6 +47,10 @@ def generate_top_loops(query: dict) -> dict:
             },
         }
     ]
+    reason = None
+    if osm_status == "partial" or usgs_status == "partial":
+        reason = "Live fetch failed; serving cached source artifacts."
+
     response = QueryResponse(
         query=query,
         meta={
@@ -49,6 +58,7 @@ def generate_top_loops(query: dict) -> dict:
             "cache": {"osm": osm_status, "usgs": usgs_status},
             "candidates_considered": len(routes),
             "routes_returned": len(routes),
+            "reason": reason,
         },
         routes=routes,
     )
