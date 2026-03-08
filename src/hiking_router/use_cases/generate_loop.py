@@ -9,6 +9,7 @@ from hiking_router.features.dem_sampling import (
     route_elevation_metrics,
 )
 from hiking_router.models.response import QueryResponse
+from hiking_router.providers.fetcher import SourceUnavailableError
 from hiking_router.providers.fetcher import http_get_bytes
 from hiking_router.providers.overpass import fetch_overpass_geojson
 from hiking_router.providers.tnm import fetch_tnm_download_url
@@ -21,6 +22,7 @@ def generate_top_loops(query: dict) -> dict:
     bbox = (-80.0, 37.0, -79.0, 38.0)
 
     force_live = bool(query.get("force_live", False))
+    strict_live = bool(query.get("strict_live", False))
     osm_client = OSMClient(
         cache_dir=cache_root,
         fetch_trails_fn=lambda b: fetch_overpass_geojson(
@@ -43,12 +45,32 @@ def generate_top_loops(query: dict) -> dict:
         ),
     )
 
-    _, osm_status = osm_client.fetch_trails(
-        tile_id=tile_id, bbox=bbox, force_live=force_live
-    )
-    dem_path, usgs_status = usgs_client.fetch_dem(
-        tile_id=tile_id, bbox=bbox, force_live=force_live
-    )
+    try:
+        _, osm_status = osm_client.fetch_trails(
+            tile_id=tile_id,
+            bbox=bbox,
+            force_live=force_live,
+            strict_live=strict_live,
+        )
+        dem_path, usgs_status = usgs_client.fetch_dem(
+            tile_id=tile_id,
+            bbox=bbox,
+            force_live=force_live,
+            strict_live=strict_live,
+        )
+    except SourceUnavailableError:
+        response = QueryResponse(
+            query=query,
+            meta={
+                "engine_version": "v2-osm-usgs",
+                "cache": {"osm": "miss", "usgs": "miss"},
+                "candidates_considered": 0,
+                "routes_returned": 0,
+                "reason": "Insufficient live source coverage and no cached data available.",
+            },
+            routes=[],
+        )
+        return response.model_dump()
 
     distance_miles = float(query.get("miles_min", 0))
     profile = profile_from_dem_artifact(dem_path)

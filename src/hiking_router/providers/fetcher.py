@@ -22,6 +22,10 @@ class FetchTimeout(FetchError):
     pass
 
 
+class SourceUnavailableError(FetchError):
+    pass
+
+
 def parse_json_or_raise(payload: str) -> dict:
     try:
         return json.loads(payload)

@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from hiking_router.providers.fetcher import SourceUnavailableError
 from hiking_router.providers.overpass import fetch_overpass_geojson
 
 
@@ -18,6 +19,7 @@ class OSMClient:
         tile_id: str,
         bbox: tuple[float, float, float, float],
         force_live: bool = False,
+        strict_live: bool = False,
     ) -> tuple[dict, str]:
         path = self.cache_dir / "raw" / "osm" / f"{tile_id}.geojson"
 
@@ -34,6 +36,10 @@ class OSMClient:
         except Exception:
             if path.exists():
                 return json.loads(path.read_text()), "partial"
+            if strict_live:
+                raise SourceUnavailableError(
+                    "OSM live fetch failed and no cached artifact exists."
+                )
 
             # Offline-safe fallback to avoid hard failure in local/dev mode.
             fallback = {"type": "FeatureCollection", "features": []}

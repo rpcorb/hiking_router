@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from hiking_router.providers.fetcher import SourceUnavailableError
 from hiking_router.providers.fetcher import http_get_bytes
 from hiking_router.providers.tnm import fetch_tnm_download_url
 
@@ -20,6 +21,7 @@ class USGSClient:
         tile_id: str,
         bbox: tuple[float, float, float, float],
         force_live: bool = False,
+        strict_live: bool = False,
     ) -> tuple[Path, str]:
         path = self.cache_dir / "raw" / "usgs" / f"{tile_id}.tif"
 
@@ -38,6 +40,10 @@ class USGSClient:
 
         if path.exists():
             return path, "partial"
+        if strict_live:
+            raise SourceUnavailableError(
+                "USGS live fetch failed and no cached artifact exists."
+            )
 
         # Offline-safe fallback artifact.
         path.parent.mkdir(parents=True, exist_ok=True)
