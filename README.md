@@ -10,6 +10,14 @@ python3 -m venv .venv
 python -m pip install pytest typer pydantic networkx
 ```
 
+Provider config is environment-driven (v3):
+- `HIKING_ROUTER_OSM_PROVIDER` (default: `overpass`)
+- `HIKING_ROUTER_USGS_PROVIDER` (default: `tnm`)
+- `HIKING_ROUTER_OSM_BASE_URL`
+- `HIKING_ROUTER_USGS_BASE_URL`
+- `HIKING_ROUTER_TIMEOUT_SECONDS` (default: `20`)
+- `HIKING_ROUTER_RETRY_COUNT` (default: `3`)
+
 ## Run tests
 
 ```bash
@@ -112,10 +120,12 @@ As real terrain processing is expanded, route metrics will move from placeholder
   - `cache/raw/usgs/<tile>.tif`
 - Derived cache paths:
   - `cache/derived/graph/<query-key>.json`
+- With `force_live` semantics in use-case orchestration, live-source failure with existing cache results in `partial` status and `meta.reason`.
 
 ## Status and limitations
 
 - OSM/USGS adapters currently implement cache-first local behavior with placeholder miss artifacts.
+- Live fallback semantics are implemented: when forced live fetch degrades, cached artifacts are served and reason is surfaced.
 - Search/scoring are still baseline implementations (full terrain-aware ranking is next).
 - Ridge/summit/scenic values are intentionally `null` in v2.
 
