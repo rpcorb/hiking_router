@@ -25,17 +25,7 @@ def generate_loop(
         miles_max=miles_max,
         difficulty=difficulty,
     )
-    routes = generate_top_loops(query.model_dump())
-    response = {
-        "query": query.model_dump(),
-        "meta": {
-            "engine_version": "v2-osm-usgs",
-            "cache": {"osm": "miss", "usgs": "miss"},
-            "candidates_considered": len(routes),
-            "routes_returned": len(routes),
-        },
-        "routes": routes,
-    }
+    response = generate_top_loops(query.model_dump())
     print(json.dumps(response))
 
 
