@@ -7,10 +7,15 @@ class OSMClient:
         self.cache_dir = cache_dir
 
     def fetch_trails(
-        self, tile_id: str, bbox: tuple[float, float, float, float]
+        self,
+        tile_id: str,
+        bbox: tuple[float, float, float, float],
+        force_live: bool = False,
     ) -> tuple[dict, str]:
         _ = bbox
         path = self.cache_dir / "raw" / "osm" / f"{tile_id}.geojson"
+        if force_live and path.exists():
+            return json.loads(path.read_text()), "partial"
         if path.exists():
             return json.loads(path.read_text()), "hit"
         return {"type": "FeatureCollection", "features": []}, "miss"
