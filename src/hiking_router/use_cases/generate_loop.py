@@ -4,6 +4,10 @@ from pathlib import Path
 from hiking_router.adapters.osm_client import OSMClient
 from hiking_router.adapters.usgs_client import USGSClient
 from hiking_router.config.providers import ProviderConfig
+from hiking_router.features.dem_sampling import (
+    profile_from_dem_artifact,
+    route_elevation_metrics,
+)
 from hiking_router.models.response import QueryResponse
 from hiking_router.providers.fetcher import http_get_bytes
 from hiking_router.providers.overpass import fetch_overpass_geojson
@@ -42,17 +46,21 @@ def generate_top_loops(query: dict) -> dict:
     _, osm_status = osm_client.fetch_trails(
         tile_id=tile_id, bbox=bbox, force_live=force_live
     )
-    _, usgs_status = usgs_client.fetch_dem(
+    dem_path, usgs_status = usgs_client.fetch_dem(
         tile_id=tile_id, bbox=bbox, force_live=force_live
     )
+
+    distance_miles = float(query.get("miles_min", 0))
+    profile = profile_from_dem_artifact(dem_path)
+    metrics = route_elevation_metrics(samples=profile, distance_miles=distance_miles)
 
     routes = [
         {
             "id": "prototype-roanoke-loop",
             "name": f"Prototype loop near {query.get('near', 'unknown')}",
-            "distance_miles": float(query.get("miles_min", 0)),
-            "elevation_gain_ft": 0.0,
-            "elevation_gain_per_mile_ft": 0.0,
+            "distance_miles": distance_miles,
+            "elevation_gain_ft": metrics["gain_ft"],
+            "elevation_gain_per_mile_ft": metrics["gain_per_mile_ft"],
             "difficulty": query.get("difficulty", "unknown"),
             "score": 0.5,
             "terrain": {
