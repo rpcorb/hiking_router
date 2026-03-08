@@ -10,6 +10,7 @@ requires-python = ">=3.13"
 dependencies = [
   "typer>=0.24.1",
   "pydantic>=2.12.5",
+  "networkx>=3.6.1",
 ]
 
 [project.optional-dependencies]
