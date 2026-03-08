@@ -29,58 +29,95 @@ PYTHONPATH=src python -m hiking_router.cli generate-loop \
   --difficulty strenuous
 ```
 
-Current CLI returns up to top-3 placeholder ranked routes via the orchestration entrypoint.
+CLI returns a JSON envelope with `query`, `meta`, and `routes`.
 
 ## Response contract
 
-`generate-loop` currently prints a Python list of route objects (`list[dict]`) to stdout.
+`generate-loop` prints JSON (`dict`) to stdout.
 
 ### Current shape (placeholder)
 
-```python
-[
-  {
-    "name": "Prototype loop near Roanoke, VA",
-    "distance_miles": 12.0,
-    "difficulty": "strenuous",
-    "score": 0.5
-  }
-]
+```json
+{
+  "query": {
+    "near": "Roanoke, VA",
+    "miles_min": 12.0,
+    "miles_max": 15.0,
+    "difficulty": "strenuous"
+  },
+  "meta": {
+    "engine_version": "v2-osm-usgs",
+    "cache": {
+      "osm": "hit",
+      "usgs": "hit"
+    },
+    "candidates_considered": 1,
+    "routes_returned": 1,
+    "reason": null
+  },
+  "routes": [
+    {
+      "id": "prototype-roanoke-loop",
+      "name": "Prototype loop near Roanoke, VA",
+      "distance_miles": 12.0,
+      "elevation_gain_ft": 0.0,
+      "elevation_gain_per_mile_ft": 0.0,
+      "difficulty": "strenuous",
+      "score": 0.5,
+      "terrain": {
+        "ridge_fraction": null,
+        "summit_proximity_min_m": null,
+        "scenic_score": null
+      }
+    }
+  ]
+}
 ```
 
 ### Current attributes
 
-- `name` (`str`): Human-readable route label.
-- `distance_miles` (`float`): Placeholder distance value (currently seeded from `--miles-min`).
-- `difficulty` (`str`): Difficulty requested by the user.
-- `score` (`float`): Composite ranking score in `[0.0, 1.0]` (currently fixed placeholder).
+- `query` (`dict`): Echo of normalized request parameters.
+- `meta.engine_version` (`str`): Response schema/engine marker (`v2-osm-usgs`).
+- `meta.cache` (`dict`): Source cache statuses for `osm` and `usgs` (`hit|miss|partial`).
+- `meta.candidates_considered` (`int`): Number of candidate routes scored before truncation.
+- `meta.routes_returned` (`int`): Number of routes returned in `routes`.
+- `meta.reason` (`str | null`): Optional explanation when no qualifying routes are returned.
+- `routes[].id` (`str`): Stable route identifier.
+- `routes[].name` (`str`): Human-readable route label.
+- `routes[].distance_miles` (`float`): Route distance in miles.
+- `routes[].elevation_gain_ft` (`float`): Total ascent in feet.
+- `routes[].elevation_gain_per_mile_ft` (`float`): Ascent intensity in feet per mile.
+- `routes[].difficulty` (`str`): Difficulty class for the returned route.
+- `routes[].score` (`float`): Composite ranking score in `[0.0, 1.0]`.
+- `routes[].terrain.ridge_fraction` (`float | null`): Placeholder (v3).
+- `routes[].terrain.summit_proximity_min_m` (`float | null`): Placeholder (v3).
+- `routes[].terrain.scenic_score` (`float | null`): Placeholder (v3).
 
 ### Response guarantees
 
-- Returns `0..3` ranked routes (top-k behavior).
+- Returns `0..3` ranked routes in `routes`.
 - Output order is descending rank (best first).
-- Shape is intentionally minimal while data ingestion/search/scoring are still stubbed.
+- Top-level shape is stable and JSON-serializable.
 
 ### Planned expansion
 
-As real terrain processing is implemented, each route object will expand with route and terrain metrics such as:
-- elevation gain/loss
-- elevation gain per mile
-- ridge-line fraction
-- summit proximity
-- scenic score breakdown
+As real terrain processing is expanded, route metrics will move from placeholders to sampled terrain values and include geometry output.
 
-## Cache behavior (planned)
+## Cache behavior
 
-- First query in an area: fetch missing tiles and preprocess features.
-- Warm-cache query in same area: reuse tile and query-view caches for faster response.
-- Tile cache and query radius cache are both part of the design and represented by stable cache-key primitives.
+- First query in an area usually reports source cache `miss`.
+- Repeated query in same area reports source cache `hit` or `partial`.
+- Raw cache paths:
+  - `cache/raw/osm/<tile>.geojson`
+  - `cache/raw/usgs/<tile>.tif`
+- Derived cache paths:
+  - `cache/derived/graph/<query-key>.json`
 
 ## Status and limitations
 
-- Data adapters are currently interface stubs.
-- Search/scoring modules are baseline placeholders for iterative buildout.
-- E2E and performance tests are harness-level checks, not full real-data validation yet.
+- OSM/USGS adapters currently implement cache-first local behavior with placeholder miss artifacts.
+- Search/scoring are still baseline implementations (full terrain-aware ranking is next).
+- Ridge/summit/scenic values are intentionally `null` in v2.
 
 ## Next optimization steps
 
