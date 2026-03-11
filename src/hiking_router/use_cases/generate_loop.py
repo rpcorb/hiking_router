@@ -4,6 +4,7 @@ from pathlib import Path
 import networkx as nx
 from hiking_router.adapters.osm_client import OSMClient
 from hiking_router.adapters.ridge_client import RidgeClient
+from hiking_router.adapters.summit_client import SummitClient
 from hiking_router.adapters.usgs_client import USGSClient
 from hiking_router.config.providers import ProviderConfig
 from hiking_router.features.dem_sampling import (
@@ -11,6 +12,7 @@ from hiking_router.features.dem_sampling import (
     route_elevation_metrics,
 )
 from hiking_router.features.ridge_overlap import route_ridge_fraction
+from hiking_router.features.summit_proximity import route_summit_proximity_min_m
 from hiking_router.graph.osm_normalize import extract_segment_edges
 from hiking_router.models.response import QueryResponse
 from hiking_router.providers.fetcher import SourceUnavailableError, http_get_bytes
@@ -49,6 +51,7 @@ def generate_top_loops(query: dict) -> dict:
         ),
     )
     ridge_client = RidgeClient(cache_dir=cache_root)
+    summit_client = SummitClient(cache_dir=cache_root)
     usgs_client = USGSClient(
         cache_dir=cache_root,
         fetch_download_url_fn=lambda b: fetch_tnm_download_url(
@@ -70,6 +73,12 @@ def generate_top_loops(query: dict) -> dict:
             strict_live=strict_live,
         )
         ridge_payload, _ridge_status = ridge_client.fetch_ridges(
+            tile_id=tile_id,
+            bbox=bbox,
+            force_live=force_live,
+            strict_live=strict_live,
+        )
+        summit_payload, _summit_status = summit_client.fetch_summits(
             tile_id=tile_id,
             bbox=bbox,
             force_live=force_live,
@@ -136,6 +145,11 @@ def generate_top_loops(query: dict) -> dict:
             edge_details=edge_details,
             ridge_feature_collection=ridge_payload,
         )
+        summit_proximity = route_summit_proximity_min_m(
+            route_nodes=loop,
+            edge_details=edge_details,
+            summit_feature_collection=summit_payload,
+        )
         distance_mid = (miles_min + miles_max) / 2 if miles_max >= miles_min else miles_min
         distance_error = abs(loop_miles - distance_mid)
         distance_fit = max(0.0, 1.0 - (distance_error / max(distance_mid, 0.1)))
@@ -157,7 +171,7 @@ def generate_top_loops(query: dict) -> dict:
                 "score": score,
                 "terrain": {
                     "ridge_fraction": ridge_frac,
-                    "summit_proximity_min_m": None,
+                    "summit_proximity_min_m": summit_proximity,
                     "scenic_score": None,
                 },
             }
