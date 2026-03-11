@@ -20,7 +20,11 @@ from hiking_router.providers.fetcher import SourceUnavailableError, http_get_byt
 from hiking_router.providers.overpass import fetch_overpass_geojson
 from hiking_router.providers.tnm import fetch_tnm_download_url
 from hiking_router.scoring.composite import composite_score
+from hiking_router.scoring.composite import difficulty_fit_score
+from hiking_router.scoring.composite import distance_fit_score
+from hiking_router.scoring.composite import sustained_grade_penalty
 from hiking_router.scoring.scenic import scenic_score
+from hiking_router.search.diversity import select_diverse_loops
 from hiking_router.search.loop_search import filter_loops_by_distance_band, find_loops
 
 
@@ -137,10 +141,15 @@ def generate_top_loops(query: dict) -> dict:
     selected_loops = filter_loops_by_distance_band(
         loops, lengths, miles_min=miles_min, miles_max=miles_max
     )
+    selected_loops = select_diverse_loops(
+        candidates=selected_loops,
+        max_loops=10,
+        max_similarity=0.75,
+    )
 
     profile = profile_from_dem_artifact(dem_path)
     routes: list[dict] = []
-    for idx, loop in enumerate(selected_loops[:3], start=1):
+    for loop in selected_loops:
         loop_miles = lengths.get(tuple(loop), miles_min)
         metrics = route_elevation_metrics(samples=profile, distance_miles=loop_miles)
         ridge_frac = route_ridge_fraction(
@@ -153,10 +162,19 @@ def generate_top_loops(query: dict) -> dict:
             edge_details=edge_details,
             summit_feature_collection=summit_payload,
         )
-        distance_mid = (miles_min + miles_max) / 2 if miles_max >= miles_min else miles_min
-        distance_error = abs(loop_miles - distance_mid)
-        distance_fit = max(0.0, 1.0 - (distance_error / max(distance_mid, 0.1)))
-        difficulty_fit = min(1.0, metrics["gain_per_mile_ft"] / 500.0)
+        distance_fit = distance_fit_score(
+            loop_miles=loop_miles,
+            miles_min=miles_min,
+            miles_max=miles_max,
+        )
+        difficulty_fit = difficulty_fit_score(
+            gain_per_mile_ft=metrics["gain_per_mile_ft"],
+            difficulty=query.get("difficulty", "unknown"),
+        )
+        grade_penalty = sustained_grade_penalty(
+            gain_per_mile_ft=metrics["gain_per_mile_ft"],
+            difficulty=query.get("difficulty", "unknown"),
+        )
         score = composite_score(
             distance_fit=distance_fit,
             difficulty_fit=difficulty_fit,
@@ -169,7 +187,7 @@ def generate_top_loops(query: dict) -> dict:
                     cfg=scenic_cfg,
                 ),
             ),
-            penalties=0.0,
+            penalties=grade_penalty,
         )
         scenic_value = scenic_score(
             ridge_fraction=ridge_frac,
@@ -179,7 +197,7 @@ def generate_top_loops(query: dict) -> dict:
         )
         routes.append(
             {
-                "id": f"loop-{idx}",
+                "id": "loop-candidate",
                 "name": f"Loop near {query.get('near', 'unknown')} ({len(loop)} nodes)",
                 "distance_miles": loop_miles,
                 "elevation_gain_ft": metrics["gain_ft"],
@@ -193,6 +211,10 @@ def generate_top_loops(query: dict) -> dict:
                 },
             }
         )
+    routes.sort(key=lambda route: route["score"], reverse=True)
+    routes = routes[:3]
+    for idx, route in enumerate(routes, start=1):
+        route["id"] = f"loop-{idx}"
 
     if not routes:
         metrics = route_elevation_metrics(samples=profile, distance_miles=miles_min)
