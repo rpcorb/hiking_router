@@ -3,18 +3,28 @@ from pathlib import Path
 
 import networkx as nx
 from hiking_router.adapters.osm_client import OSMClient
+from hiking_router.adapters.ridge_client import RidgeClient
+from hiking_router.adapters.summit_client import SummitClient
 from hiking_router.adapters.usgs_client import USGSClient
 from hiking_router.config.providers import ProviderConfig
+from hiking_router.config.scoring import ScenicConfig
 from hiking_router.features.dem_sampling import (
     profile_from_dem_artifact,
     route_elevation_metrics,
 )
+from hiking_router.features.ridge_overlap import route_ridge_fraction
+from hiking_router.features.summit_proximity import route_summit_proximity_min_m
 from hiking_router.graph.osm_normalize import extract_segment_edges
 from hiking_router.models.response import QueryResponse
 from hiking_router.providers.fetcher import SourceUnavailableError, http_get_bytes
 from hiking_router.providers.overpass import fetch_overpass_geojson
 from hiking_router.providers.tnm import fetch_tnm_download_url
 from hiking_router.scoring.composite import composite_score
+from hiking_router.scoring.composite import difficulty_fit_score
+from hiking_router.scoring.composite import distance_fit_score
+from hiking_router.scoring.composite import sustained_grade_penalty
+from hiking_router.scoring.scenic import scenic_score
+from hiking_router.search.diversity import select_diverse_loops
 from hiking_router.search.loop_search import filter_loops_by_distance_band, find_loops
 
 
@@ -29,6 +39,7 @@ def _loop_length_miles(loop: list[str], edge_lengths_m: dict[frozenset[str], flo
 def generate_top_loops(query: dict) -> dict:
     cache_root = Path(os.environ.get("HIKING_ROUTER_CACHE_DIR", "cache"))
     cfg = ProviderConfig.from_env(dict(os.environ))
+    scenic_cfg = ScenicConfig.from_env(dict(os.environ))
     tile_id = "z10-290-391"
     bbox = (-80.0, 37.0, -79.0, 38.0)
 
@@ -46,6 +57,8 @@ def generate_top_loops(query: dict) -> dict:
             retries=cfg.retry_count,
         ),
     )
+    ridge_client = RidgeClient(cache_dir=cache_root)
+    summit_client = SummitClient(cache_dir=cache_root)
     usgs_client = USGSClient(
         cache_dir=cache_root,
         fetch_download_url_fn=lambda b: fetch_tnm_download_url(
@@ -61,6 +74,18 @@ def generate_top_loops(query: dict) -> dict:
 
     try:
         osm_payload, osm_status = osm_client.fetch_trails(
+            tile_id=tile_id,
+            bbox=bbox,
+            force_live=force_live,
+            strict_live=strict_live,
+        )
+        ridge_payload, _ridge_status = ridge_client.fetch_ridges(
+            tile_id=tile_id,
+            bbox=bbox,
+            force_live=force_live,
+            strict_live=strict_live,
+        )
+        summit_payload, _summit_status = summit_client.fetch_summits(
             tile_id=tile_id,
             bbox=bbox,
             force_live=force_live,
@@ -91,12 +116,19 @@ def generate_top_loops(query: dict) -> dict:
 
     graph = nx.Graph()
     edge_lengths_m: dict[frozenset[str], float] = {}
+    edge_details: dict[frozenset[str], dict] = {}
     for edge in edges:
         u = edge["from_node"]
         v = edge["to_node"]
         length_m = float(edge["length_m"])
         graph.add_edge(u, v, length_m=length_m)
-        edge_lengths_m[frozenset((u, v))] = length_m
+        key = frozenset((u, v))
+        edge_lengths_m[key] = length_m
+        edge_details[key] = {
+            "length_m": length_m,
+            "from_coord": tuple(edge["from_coord"]),
+            "to_coord": tuple(edge["to_coord"]),
+        }
 
     loops: list[list[str]] = []
     lengths: dict[tuple[str, ...], float] = {}
@@ -109,25 +141,63 @@ def generate_top_loops(query: dict) -> dict:
     selected_loops = filter_loops_by_distance_band(
         loops, lengths, miles_min=miles_min, miles_max=miles_max
     )
+    selected_loops = select_diverse_loops(
+        candidates=selected_loops,
+        max_loops=10,
+        max_similarity=0.75,
+    )
 
     profile = profile_from_dem_artifact(dem_path)
     routes: list[dict] = []
-    for idx, loop in enumerate(selected_loops[:3], start=1):
+    for loop in selected_loops:
         loop_miles = lengths.get(tuple(loop), miles_min)
         metrics = route_elevation_metrics(samples=profile, distance_miles=loop_miles)
-        distance_mid = (miles_min + miles_max) / 2 if miles_max >= miles_min else miles_min
-        distance_error = abs(loop_miles - distance_mid)
-        distance_fit = max(0.0, 1.0 - (distance_error / max(distance_mid, 0.1)))
-        difficulty_fit = min(1.0, metrics["gain_per_mile_ft"] / 500.0)
+        ridge_frac = route_ridge_fraction(
+            route_nodes=loop,
+            edge_details=edge_details,
+            ridge_feature_collection=ridge_payload,
+        )
+        summit_proximity = route_summit_proximity_min_m(
+            route_nodes=loop,
+            edge_details=edge_details,
+            summit_feature_collection=summit_payload,
+        )
+        distance_fit = distance_fit_score(
+            loop_miles=loop_miles,
+            miles_min=miles_min,
+            miles_max=miles_max,
+        )
+        difficulty_fit = difficulty_fit_score(
+            gain_per_mile_ft=metrics["gain_per_mile_ft"],
+            difficulty=query.get("difficulty", "unknown"),
+        )
+        grade_penalty = sustained_grade_penalty(
+            gain_per_mile_ft=metrics["gain_per_mile_ft"],
+            difficulty=query.get("difficulty", "unknown"),
+        )
         score = composite_score(
             distance_fit=distance_fit,
             difficulty_fit=difficulty_fit,
-            terrain_fit=0.3,
-            penalties=0.0,
+            terrain_fit=max(
+                0.3,
+                scenic_score(
+                    ridge_fraction=ridge_frac,
+                    summit_proximity_min_m=summit_proximity,
+                    elevation_gain_per_mile_ft=metrics["gain_per_mile_ft"],
+                    cfg=scenic_cfg,
+                ),
+            ),
+            penalties=grade_penalty,
+        )
+        scenic_value = scenic_score(
+            ridge_fraction=ridge_frac,
+            summit_proximity_min_m=summit_proximity,
+            elevation_gain_per_mile_ft=metrics["gain_per_mile_ft"],
+            cfg=scenic_cfg,
         )
         routes.append(
             {
-                "id": f"loop-{idx}",
+                "id": "loop-candidate",
                 "name": f"Loop near {query.get('near', 'unknown')} ({len(loop)} nodes)",
                 "distance_miles": loop_miles,
                 "elevation_gain_ft": metrics["gain_ft"],
@@ -135,12 +205,16 @@ def generate_top_loops(query: dict) -> dict:
                 "difficulty": query.get("difficulty", "unknown"),
                 "score": score,
                 "terrain": {
-                    "ridge_fraction": None,
-                    "summit_proximity_min_m": None,
-                    "scenic_score": None,
+                    "ridge_fraction": ridge_frac,
+                    "summit_proximity_min_m": summit_proximity,
+                    "scenic_score": scenic_value,
                 },
             }
         )
+    routes.sort(key=lambda route: route["score"], reverse=True)
+    routes = routes[:3]
+    for idx, route in enumerate(routes, start=1):
+        route["id"] = f"loop-{idx}"
 
     if not routes:
         metrics = route_elevation_metrics(samples=profile, distance_miles=miles_min)
@@ -154,9 +228,14 @@ def generate_top_loops(query: dict) -> dict:
                 "difficulty": query.get("difficulty", "unknown"),
                 "score": 0.5,
                 "terrain": {
-                    "ridge_fraction": None,
+                    "ridge_fraction": 0.0,
                     "summit_proximity_min_m": None,
-                    "scenic_score": None,
+                    "scenic_score": scenic_score(
+                        ridge_fraction=0.0,
+                        summit_proximity_min_m=None,
+                        elevation_gain_per_mile_ft=metrics["gain_per_mile_ft"],
+                        cfg=scenic_cfg,
+                    ),
                 },
             }
         ]

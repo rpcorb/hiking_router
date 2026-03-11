@@ -16,6 +16,14 @@ class USGSClient:
         self.fetch_download_url_fn = fetch_download_url_fn
         self.download_bytes_fn = download_bytes_fn
 
+    @staticmethod
+    def _is_valid_dem_bytes(data: bytes) -> bool:
+        return isinstance(data, (bytes, bytearray)) and len(data) > 0
+
+    @staticmethod
+    def _is_valid_dem_file(path: Path) -> bool:
+        return path.exists() and path.is_file() and path.stat().st_size > 0
+
     def fetch_dem(
         self,
         tile_id: str,
@@ -25,20 +33,21 @@ class USGSClient:
     ) -> tuple[Path, str]:
         path = self.cache_dir / "raw" / "usgs" / f"{tile_id}.tif"
 
-        if not force_live and path.exists():
+        if not force_live and self._is_valid_dem_file(path):
             return path, "hit"
 
         try:
             url = self.fetch_download_url_fn(bbox)
             if url:
                 data = self.download_bytes_fn(url)
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(data)
-                return path, "miss" if not force_live else "hit"
+                if self._is_valid_dem_bytes(data):
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(data)
+                    return path, "miss" if not force_live else "hit"
         except Exception:
             pass
 
-        if path.exists():
+        if self._is_valid_dem_file(path):
             return path, "partial"
         if strict_live:
             raise SourceUnavailableError(
