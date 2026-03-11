@@ -3,12 +3,14 @@ from pathlib import Path
 
 import networkx as nx
 from hiking_router.adapters.osm_client import OSMClient
+from hiking_router.adapters.ridge_client import RidgeClient
 from hiking_router.adapters.usgs_client import USGSClient
 from hiking_router.config.providers import ProviderConfig
 from hiking_router.features.dem_sampling import (
     profile_from_dem_artifact,
     route_elevation_metrics,
 )
+from hiking_router.features.ridge_overlap import route_ridge_fraction
 from hiking_router.graph.osm_normalize import extract_segment_edges
 from hiking_router.models.response import QueryResponse
 from hiking_router.providers.fetcher import SourceUnavailableError, http_get_bytes
@@ -46,6 +48,7 @@ def generate_top_loops(query: dict) -> dict:
             retries=cfg.retry_count,
         ),
     )
+    ridge_client = RidgeClient(cache_dir=cache_root)
     usgs_client = USGSClient(
         cache_dir=cache_root,
         fetch_download_url_fn=lambda b: fetch_tnm_download_url(
@@ -61,6 +64,12 @@ def generate_top_loops(query: dict) -> dict:
 
     try:
         osm_payload, osm_status = osm_client.fetch_trails(
+            tile_id=tile_id,
+            bbox=bbox,
+            force_live=force_live,
+            strict_live=strict_live,
+        )
+        ridge_payload, _ridge_status = ridge_client.fetch_ridges(
             tile_id=tile_id,
             bbox=bbox,
             force_live=force_live,
@@ -91,12 +100,19 @@ def generate_top_loops(query: dict) -> dict:
 
     graph = nx.Graph()
     edge_lengths_m: dict[frozenset[str], float] = {}
+    edge_details: dict[frozenset[str], dict] = {}
     for edge in edges:
         u = edge["from_node"]
         v = edge["to_node"]
         length_m = float(edge["length_m"])
         graph.add_edge(u, v, length_m=length_m)
-        edge_lengths_m[frozenset((u, v))] = length_m
+        key = frozenset((u, v))
+        edge_lengths_m[key] = length_m
+        edge_details[key] = {
+            "length_m": length_m,
+            "from_coord": tuple(edge["from_coord"]),
+            "to_coord": tuple(edge["to_coord"]),
+        }
 
     loops: list[list[str]] = []
     lengths: dict[tuple[str, ...], float] = {}
@@ -115,6 +131,11 @@ def generate_top_loops(query: dict) -> dict:
     for idx, loop in enumerate(selected_loops[:3], start=1):
         loop_miles = lengths.get(tuple(loop), miles_min)
         metrics = route_elevation_metrics(samples=profile, distance_miles=loop_miles)
+        ridge_frac = route_ridge_fraction(
+            route_nodes=loop,
+            edge_details=edge_details,
+            ridge_feature_collection=ridge_payload,
+        )
         distance_mid = (miles_min + miles_max) / 2 if miles_max >= miles_min else miles_min
         distance_error = abs(loop_miles - distance_mid)
         distance_fit = max(0.0, 1.0 - (distance_error / max(distance_mid, 0.1)))
@@ -122,7 +143,7 @@ def generate_top_loops(query: dict) -> dict:
         score = composite_score(
             distance_fit=distance_fit,
             difficulty_fit=difficulty_fit,
-            terrain_fit=0.3,
+            terrain_fit=max(0.3, ridge_frac),
             penalties=0.0,
         )
         routes.append(
@@ -135,7 +156,7 @@ def generate_top_loops(query: dict) -> dict:
                 "difficulty": query.get("difficulty", "unknown"),
                 "score": score,
                 "terrain": {
-                    "ridge_fraction": None,
+                    "ridge_fraction": ridge_frac,
                     "summit_proximity_min_m": None,
                     "scenic_score": None,
                 },
@@ -154,7 +175,7 @@ def generate_top_loops(query: dict) -> dict:
                 "difficulty": query.get("difficulty", "unknown"),
                 "score": 0.5,
                 "terrain": {
-                    "ridge_fraction": None,
+                    "ridge_fraction": 0.0,
                     "summit_proximity_min_m": None,
                     "scenic_score": None,
                 },

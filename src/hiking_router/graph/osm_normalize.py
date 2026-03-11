@@ -36,6 +36,8 @@ def extract_segment_edges(payload: dict) -> list[dict]:
                     "from_node": str(n1),
                     "to_node": str(n2),
                     "length_m": _haversine_m(lat1, lon1, lat2, lon2),
+                    "from_coord": (lat1, lon1),
+                    "to_coord": (lat2, lon2),
                 }
             )
     return edges

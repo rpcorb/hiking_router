@@ -73,7 +73,7 @@ CLI returns a JSON envelope with `query`, `meta`, and `routes`.
       "difficulty": "strenuous",
       "score": 0.5,
       "terrain": {
-        "ridge_fraction": null,
+        "ridge_fraction": 0.0,
         "summit_proximity_min_m": null,
         "scenic_score": null
       }
@@ -97,9 +97,9 @@ CLI returns a JSON envelope with `query`, `meta`, and `routes`.
 - `routes[].elevation_gain_per_mile_ft` (`float`): Ascent intensity in feet per mile.
 - `routes[].difficulty` (`str`): Difficulty class for the returned route.
 - `routes[].score` (`float`): Composite ranking score in `[0.0, 1.0]`.
-- `routes[].terrain.ridge_fraction` (`float | null`): Placeholder (v3).
-- `routes[].terrain.summit_proximity_min_m` (`float | null`): Placeholder (v3).
-- `routes[].terrain.scenic_score` (`float | null`): Placeholder (v3).
+- `routes[].terrain.ridge_fraction` (`float`): Fraction of route distance overlapping ridge segments, normalized to `[0.0, 1.0]`.
+- `routes[].terrain.summit_proximity_min_m` (`float | null`): Placeholder for summit-distance metric (planned in milestone B).
+- `routes[].terrain.scenic_score` (`float | null`): Placeholder for weighted scenic score (planned in milestone C).
 
 ### Response guarantees
 
@@ -107,9 +107,11 @@ CLI returns a JSON envelope with `query`, `meta`, and `routes`.
 - Output order is descending rank (best first).
 - Top-level shape is stable and JSON-serializable.
 
-### Planned expansion
+### Terrain metric behavior
 
-As real terrain processing is expanded, route metrics will move from placeholders to sampled terrain values and include geometry output.
+- `ridge_fraction` is populated in v4 milestone A.
+- If ridge data is unavailable and `strict_live=false`, ridge cache falls back to an empty feature collection and `ridge_fraction` resolves to `0.0`.
+- If ridge data is unavailable and `strict_live=true` with no cache artifact, request fails with source-unavailable behavior.
 
 ## Cache behavior
 
@@ -117,6 +119,7 @@ As real terrain processing is expanded, route metrics will move from placeholder
 - Repeated query in same area reports source cache `hit` or `partial`.
 - Raw cache paths:
   - `cache/raw/osm/<tile>.geojson`
+  - `cache/raw/ridge/<tile>.geojson`
   - `cache/raw/usgs/<tile>.tif`
 - Derived cache paths:
   - `cache/derived/graph/<query-key>.json`
@@ -127,7 +130,7 @@ As real terrain processing is expanded, route metrics will move from placeholder
 - OSM/USGS adapters currently implement cache-first local behavior with placeholder miss artifacts.
 - Live fallback semantics are implemented: when forced live fetch degrades, cached artifacts are served and reason is surfaced.
 - Search/scoring are still baseline implementations (full terrain-aware ranking is next).
-- Ridge/summit/scenic values are intentionally `null` in v2.
+- `ridge_fraction` is now computed; summit/scenic remain `null` until later milestones.
 
 ## Next optimization steps
 
