@@ -7,6 +7,7 @@ from hiking_router.adapters.ridge_client import RidgeClient
 from hiking_router.adapters.summit_client import SummitClient
 from hiking_router.adapters.usgs_client import USGSClient
 from hiking_router.config.providers import ProviderConfig
+from hiking_router.config.scoring import ScenicConfig
 from hiking_router.features.dem_sampling import (
     profile_from_dem_artifact,
     route_elevation_metrics,
@@ -19,6 +20,7 @@ from hiking_router.providers.fetcher import SourceUnavailableError, http_get_byt
 from hiking_router.providers.overpass import fetch_overpass_geojson
 from hiking_router.providers.tnm import fetch_tnm_download_url
 from hiking_router.scoring.composite import composite_score
+from hiking_router.scoring.scenic import scenic_score
 from hiking_router.search.loop_search import filter_loops_by_distance_band, find_loops
 
 
@@ -33,6 +35,7 @@ def _loop_length_miles(loop: list[str], edge_lengths_m: dict[frozenset[str], flo
 def generate_top_loops(query: dict) -> dict:
     cache_root = Path(os.environ.get("HIKING_ROUTER_CACHE_DIR", "cache"))
     cfg = ProviderConfig.from_env(dict(os.environ))
+    scenic_cfg = ScenicConfig.from_env(dict(os.environ))
     tile_id = "z10-290-391"
     bbox = (-80.0, 37.0, -79.0, 38.0)
 
@@ -157,8 +160,22 @@ def generate_top_loops(query: dict) -> dict:
         score = composite_score(
             distance_fit=distance_fit,
             difficulty_fit=difficulty_fit,
-            terrain_fit=max(0.3, ridge_frac),
+            terrain_fit=max(
+                0.3,
+                scenic_score(
+                    ridge_fraction=ridge_frac,
+                    summit_proximity_min_m=summit_proximity,
+                    elevation_gain_per_mile_ft=metrics["gain_per_mile_ft"],
+                    cfg=scenic_cfg,
+                ),
+            ),
             penalties=0.0,
+        )
+        scenic_value = scenic_score(
+            ridge_fraction=ridge_frac,
+            summit_proximity_min_m=summit_proximity,
+            elevation_gain_per_mile_ft=metrics["gain_per_mile_ft"],
+            cfg=scenic_cfg,
         )
         routes.append(
             {
@@ -172,7 +189,7 @@ def generate_top_loops(query: dict) -> dict:
                 "terrain": {
                     "ridge_fraction": ridge_frac,
                     "summit_proximity_min_m": summit_proximity,
-                    "scenic_score": None,
+                    "scenic_score": scenic_value,
                 },
             }
         )
@@ -191,7 +208,12 @@ def generate_top_loops(query: dict) -> dict:
                 "terrain": {
                     "ridge_fraction": 0.0,
                     "summit_proximity_min_m": None,
-                    "scenic_score": None,
+                    "scenic_score": scenic_score(
+                        ridge_fraction=0.0,
+                        summit_proximity_min_m=None,
+                        elevation_gain_per_mile_ft=metrics["gain_per_mile_ft"],
+                        cfg=scenic_cfg,
+                    ),
                 },
             }
         ]

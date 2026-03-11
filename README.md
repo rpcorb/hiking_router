@@ -75,7 +75,7 @@ CLI returns a JSON envelope with `query`, `meta`, and `routes`.
       "terrain": {
         "ridge_fraction": 0.0,
         "summit_proximity_min_m": null,
-        "scenic_score": null
+        "scenic_score": 0.0
       }
     }
   ]
@@ -98,8 +98,8 @@ CLI returns a JSON envelope with `query`, `meta`, and `routes`.
 - `routes[].difficulty` (`str`): Difficulty class for the returned route.
 - `routes[].score` (`float`): Composite ranking score in `[0.0, 1.0]`.
 - `routes[].terrain.ridge_fraction` (`float`): Fraction of route distance overlapping ridge segments, normalized to `[0.0, 1.0]`.
-- `routes[].terrain.summit_proximity_min_m` (`float | null`): Placeholder for summit-distance metric (planned in milestone B).
-- `routes[].terrain.scenic_score` (`float | null`): Placeholder for weighted scenic score (planned in milestone C).
+- `routes[].terrain.summit_proximity_min_m` (`float | null`): Minimum summit distance from route geometry in meters (null when summit dataset has no points).
+- `routes[].terrain.scenic_score` (`float`): Weighted normalized score in `[0.0, 1.0]` derived from ridge overlap, summit proximity, and elevation intensity.
 
 ### Response guarantees
 
@@ -110,8 +110,16 @@ CLI returns a JSON envelope with `query`, `meta`, and `routes`.
 ### Terrain metric behavior
 
 - `ridge_fraction` is populated in v4 milestone A.
+- `summit_proximity_min_m` is populated in v4 milestone B when summit points are present; otherwise `null`.
+- `scenic_score` is populated in v4 milestone C and is deterministic for fixed input data.
 - If ridge data is unavailable and `strict_live=false`, ridge cache falls back to an empty feature collection and `ridge_fraction` resolves to `0.0`.
 - If ridge data is unavailable and `strict_live=true` with no cache artifact, request fails with source-unavailable behavior.
+- Scenic defaults can be overridden with:
+  - `HIKING_ROUTER_SCENIC_WEIGHT_RIDGE`
+  - `HIKING_ROUTER_SCENIC_WEIGHT_SUMMIT`
+  - `HIKING_ROUTER_SCENIC_WEIGHT_ELEVATION`
+  - `HIKING_ROUTER_SCENIC_SUMMIT_MAX_DISTANCE_M`
+  - `HIKING_ROUTER_SCENIC_ELEVATION_SCALE_FT_PER_MILE`
 
 ## Cache behavior
 
@@ -120,6 +128,7 @@ CLI returns a JSON envelope with `query`, `meta`, and `routes`.
 - Raw cache paths:
   - `cache/raw/osm/<tile>.geojson`
   - `cache/raw/ridge/<tile>.geojson`
+  - `cache/raw/summit/<tile>.geojson`
   - `cache/raw/usgs/<tile>.tif`
 - Derived cache paths:
   - `cache/derived/graph/<query-key>.json`
@@ -130,7 +139,7 @@ CLI returns a JSON envelope with `query`, `meta`, and `routes`.
 - OSM/USGS adapters currently implement cache-first local behavior with placeholder miss artifacts.
 - Live fallback semantics are implemented: when forced live fetch degrades, cached artifacts are served and reason is surfaced.
 - Search/scoring are still baseline implementations (full terrain-aware ranking is next).
-- `ridge_fraction` is now computed; summit/scenic remain `null` until later milestones.
+- `ridge_fraction` and `scenic_score` are now computed; `summit_proximity_min_m` is computed when summit features exist.
 
 ## Next optimization steps
 
