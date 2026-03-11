@@ -9,6 +9,7 @@ from hiking_router.adapters.usgs_client import USGSClient
 from hiking_router.config.providers import ProviderConfig
 from hiking_router.config.scoring import ScenicConfig
 from hiking_router.features.dem_sampling import (
+    profile_from_dem_route_geometry,
     profile_from_dem_artifact,
     route_elevation_metrics,
 )
@@ -37,6 +38,24 @@ def _loop_length_miles(loop: list[str], edge_lengths_m: dict[frozenset[str], flo
         nxt = loop[(idx + 1) % len(loop)]
         total_m += edge_lengths_m.get(frozenset((node, nxt)), 0.0)
     return total_m / 1609.34
+
+
+def _loop_route_points(
+    loop: list[str],
+    edge_details: dict[frozenset[str], dict],
+) -> list[tuple[float, float]]:
+    points: list[tuple[float, float]] = []
+    for idx, node in enumerate(loop):
+        nxt = loop[(idx + 1) % len(loop)]
+        detail = edge_details.get(frozenset((node, nxt)))
+        if not detail:
+            continue
+        from_coord = tuple(detail.get("from_coord"))
+        to_coord = tuple(detail.get("to_coord"))
+        if not points:
+            points.append(from_coord)
+        points.append(to_coord)
+    return points
 
 
 def generate_top_loops(query: dict) -> dict:
@@ -173,10 +192,12 @@ def generate_top_loops(query: dict) -> dict:
         max_similarity=0.75,
     )
 
-    profile = profile_from_dem_artifact(dem_path)
+    default_profile = profile_from_dem_artifact(dem_path)
     routes: list[dict] = []
     for loop in selected_loops:
         loop_miles = lengths.get(tuple(loop), miles_min)
+        route_points = _loop_route_points(loop, edge_details=edge_details)
+        profile = profile_from_dem_route_geometry(dem_path, route_points)
         metrics = route_elevation_metrics(samples=profile, distance_miles=loop_miles)
         ridge_frac = route_ridge_fraction(
             route_nodes=loop,
@@ -243,7 +264,7 @@ def generate_top_loops(query: dict) -> dict:
         route["id"] = f"loop-{idx}"
 
     if not routes:
-        metrics = route_elevation_metrics(samples=profile, distance_miles=miles_min)
+        metrics = route_elevation_metrics(samples=default_profile, distance_miles=miles_min)
         routes = [
             {
                 "id": "prototype-roanoke-loop",
