@@ -43,7 +43,7 @@ CLI returns a JSON envelope with `query`, `meta`, and `routes`.
 
 `generate-loop` prints JSON (`dict`) to stdout.
 
-### Current shape (placeholder)
+### Current shape
 
 ```json
 {
@@ -112,8 +112,12 @@ CLI returns a JSON envelope with `query`, `meta`, and `routes`.
 - `ridge_fraction` is populated in v4 milestone A.
 - `summit_proximity_min_m` is populated in v4 milestone B when summit points are present; otherwise `null`.
 - `scenic_score` is populated in v4 milestone C and is deterministic for fixed input data.
+- Ridge live ingestion uses Overpass ridge ways.
+- Summit live ingestion uses provider priority `Overpass -> GNIS` with merge+dedupe.
 - If ridge data is unavailable and `strict_live=false`, ridge cache falls back to an empty feature collection and `ridge_fraction` resolves to `0.0`.
 - If ridge data is unavailable and `strict_live=true` with no cache artifact, request fails with source-unavailable behavior.
+- With `force_live=true`, any degraded source refresh returns routes when possible and sets `meta.reason` listing degraded sources (`osm`, `ridge`, `summit`, `usgs`).
+- Elevation metrics are sampled from DEM along per-route geometry when route coordinates are available.
 - Scenic defaults can be overridden with:
   - `HIKING_ROUTER_SCENIC_WEIGHT_RIDGE`
   - `HIKING_ROUTER_SCENIC_WEIGHT_SUMMIT`
@@ -136,14 +140,15 @@ CLI returns a JSON envelope with `query`, `meta`, and `routes`.
 
 ## Status and limitations
 
-- OSM/USGS adapters currently implement cache-first local behavior with placeholder miss artifacts.
+- OSM/USGS/ridge/summit adapters implement cache-first behavior with live fetch refresh paths.
 - Live fallback semantics are implemented: when forced live fetch degrades, cached artifacts are served and reason is surfaced.
-- Search/scoring are still baseline implementations (full terrain-aware ranking is next).
-- `ridge_fraction` and `scenic_score` are now computed; `summit_proximity_min_m` is computed when summit features exist.
+- Search/scoring include distance fit, difficulty fit, terrain fit, diversity filtering, and sustained-grade penalty.
+- `ridge_fraction` and `scenic_score` are computed; `summit_proximity_min_m` is computed when summit features exist.
+- Warm-cache performance budgets are enforced via `tests/perf/test_query_budget.py` and `tests/perf/test_warm_cache_latency.py`.
 
 ## Next optimization steps
 
-1. Implement real OSM/USGS/ridge ingestion and tile persistence.
-2. Build derived-feature preprocessing (gain/mi, ridge overlap, summit proximity, scenic factors).
-3. Add bounded loop search heuristics and diversity filtering.
-4. Introduce warm-cache benchmarking targets and profile hotspots.
+1. Expand ridge/summit coverage quality with region-aware query tuning.
+2. Add richer DEM sampling controls (spacing, smoothing, outlier handling).
+3. Add provider-level health/metrics reporting in CLI meta output.
+4. Profile and optimize larger-area graph construction workloads.

@@ -10,6 +10,14 @@
 
 ---
 
+## Status Note (2026-03-11)
+
+- V4 milestones A-E are complete and merged.
+- Follow-on work moved to V5 planning:
+  - live ridge/summit providers (`Overpass -> GNIS` for summits),
+  - per-route DEM geometry sampling realism,
+  - warm-cache performance hardening.
+
 ## Milestone Sequence
 
 ### Milestone A: Ridge/Watershed Metrics (Week 1-2)
