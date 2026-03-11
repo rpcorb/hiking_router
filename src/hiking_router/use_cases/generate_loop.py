@@ -4,11 +4,12 @@ from pathlib import Path
 import networkx as nx
 from hiking_router.adapters.osm_client import OSMClient
 from hiking_router.adapters.ridge_client import RidgeClient
-from hiking_router.adapters.summit_client import SummitClient
+from hiking_router.adapters.summit_aggregator import SummitAggregatorClient
 from hiking_router.adapters.usgs_client import USGSClient
 from hiking_router.config.providers import ProviderConfig
 from hiking_router.config.scoring import ScenicConfig
 from hiking_router.features.dem_sampling import (
+    profile_from_dem_route_geometry,
     profile_from_dem_artifact,
     route_elevation_metrics,
 )
@@ -17,7 +18,10 @@ from hiking_router.features.summit_proximity import route_summit_proximity_min_m
 from hiking_router.graph.osm_normalize import extract_segment_edges
 from hiking_router.models.response import QueryResponse
 from hiking_router.providers.fetcher import SourceUnavailableError, http_get_bytes
+from hiking_router.providers.gnis import fetch_gnis_summits
 from hiking_router.providers.overpass import fetch_overpass_geojson
+from hiking_router.providers.overpass import fetch_overpass_ridges
+from hiking_router.providers.overpass import fetch_overpass_summits
 from hiking_router.providers.tnm import fetch_tnm_download_url
 from hiking_router.scoring.composite import composite_score
 from hiking_router.scoring.composite import difficulty_fit_score
@@ -34,6 +38,24 @@ def _loop_length_miles(loop: list[str], edge_lengths_m: dict[frozenset[str], flo
         nxt = loop[(idx + 1) % len(loop)]
         total_m += edge_lengths_m.get(frozenset((node, nxt)), 0.0)
     return total_m / 1609.34
+
+
+def _loop_route_points(
+    loop: list[str],
+    edge_details: dict[frozenset[str], dict],
+) -> list[tuple[float, float]]:
+    points: list[tuple[float, float]] = []
+    for idx, node in enumerate(loop):
+        nxt = loop[(idx + 1) % len(loop)]
+        detail = edge_details.get(frozenset((node, nxt)))
+        if not detail:
+            continue
+        from_coord = tuple(detail.get("from_coord"))
+        to_coord = tuple(detail.get("to_coord"))
+        if not points:
+            points.append(from_coord)
+        points.append(to_coord)
+    return points
 
 
 def generate_top_loops(query: dict) -> dict:
@@ -57,8 +79,31 @@ def generate_top_loops(query: dict) -> dict:
             retries=cfg.retry_count,
         ),
     )
-    ridge_client = RidgeClient(cache_dir=cache_root)
-    summit_client = SummitClient(cache_dir=cache_root)
+    ridge_client = RidgeClient(
+        cache_dir=cache_root,
+        fetch_ridges_fn=lambda b: fetch_overpass_ridges(
+            b,
+            base_url=cfg.osm_base_url,
+            timeout=cfg.timeout_seconds,
+            retries=cfg.retry_count,
+        ),
+    )
+    summit_client = SummitAggregatorClient(
+        cache_dir=cache_root,
+        provider_fns=[
+            lambda b: fetch_overpass_summits(
+                b,
+                base_url=cfg.osm_base_url,
+                timeout=cfg.timeout_seconds,
+                retries=cfg.retry_count,
+            ),
+            lambda b: fetch_gnis_summits(
+                b,
+                timeout=cfg.timeout_seconds,
+                retries=cfg.retry_count,
+            ),
+        ],
+    )
     usgs_client = USGSClient(
         cache_dir=cache_root,
         fetch_download_url_fn=lambda b: fetch_tnm_download_url(
@@ -79,13 +124,13 @@ def generate_top_loops(query: dict) -> dict:
             force_live=force_live,
             strict_live=strict_live,
         )
-        ridge_payload, _ridge_status = ridge_client.fetch_ridges(
+        ridge_payload, ridge_status = ridge_client.fetch_ridges(
             tile_id=tile_id,
             bbox=bbox,
             force_live=force_live,
             strict_live=strict_live,
         )
-        summit_payload, _summit_status = summit_client.fetch_summits(
+        summit_payload, summit_status = summit_client.fetch_summits(
             tile_id=tile_id,
             bbox=bbox,
             force_live=force_live,
@@ -147,10 +192,12 @@ def generate_top_loops(query: dict) -> dict:
         max_similarity=0.75,
     )
 
-    profile = profile_from_dem_artifact(dem_path)
+    default_profile = profile_from_dem_artifact(dem_path)
     routes: list[dict] = []
     for loop in selected_loops:
         loop_miles = lengths.get(tuple(loop), miles_min)
+        route_points = _loop_route_points(loop, edge_details=edge_details)
+        profile = profile_from_dem_route_geometry(dem_path, route_points)
         metrics = route_elevation_metrics(samples=profile, distance_miles=loop_miles)
         ridge_frac = route_ridge_fraction(
             route_nodes=loop,
@@ -175,25 +222,17 @@ def generate_top_loops(query: dict) -> dict:
             gain_per_mile_ft=metrics["gain_per_mile_ft"],
             difficulty=query.get("difficulty", "unknown"),
         )
-        score = composite_score(
-            distance_fit=distance_fit,
-            difficulty_fit=difficulty_fit,
-            terrain_fit=max(
-                0.3,
-                scenic_score(
-                    ridge_fraction=ridge_frac,
-                    summit_proximity_min_m=summit_proximity,
-                    elevation_gain_per_mile_ft=metrics["gain_per_mile_ft"],
-                    cfg=scenic_cfg,
-                ),
-            ),
-            penalties=grade_penalty,
-        )
         scenic_value = scenic_score(
             ridge_fraction=ridge_frac,
             summit_proximity_min_m=summit_proximity,
             elevation_gain_per_mile_ft=metrics["gain_per_mile_ft"],
             cfg=scenic_cfg,
+        )
+        score = composite_score(
+            distance_fit=distance_fit,
+            difficulty_fit=difficulty_fit,
+            terrain_fit=max(0.3, scenic_value),
+            penalties=grade_penalty,
         )
         routes.append(
             {
@@ -217,7 +256,7 @@ def generate_top_loops(query: dict) -> dict:
         route["id"] = f"loop-{idx}"
 
     if not routes:
-        metrics = route_elevation_metrics(samples=profile, distance_miles=miles_min)
+        metrics = route_elevation_metrics(samples=default_profile, distance_miles=miles_min)
         routes = [
             {
                 "id": "prototype-roanoke-loop",
@@ -241,8 +280,18 @@ def generate_top_loops(query: dict) -> dict:
         ]
 
     reason = None
-    if osm_status == "partial" or usgs_status == "partial":
-        reason = "Live fetch failed; serving cached source artifacts."
+    degraded_sources: list[str] = []
+    if osm_status == "partial":
+        degraded_sources.append("osm")
+    if ridge_status == "partial":
+        degraded_sources.append("ridge")
+    if summit_status == "partial":
+        degraded_sources.append("summit")
+    if usgs_status == "partial":
+        degraded_sources.append("usgs")
+    if degraded_sources:
+        source_list = ", ".join(degraded_sources)
+        reason = f"Live fetch degraded for: {source_list}; serving cached/fallback artifacts."
 
     response = QueryResponse(
         query=query,
