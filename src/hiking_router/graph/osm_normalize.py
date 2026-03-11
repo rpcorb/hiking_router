@@ -13,19 +13,36 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 def extract_segment_edges(payload: dict) -> list[dict]:
     elements = payload.get("elements", [])
+    if not isinstance(elements, list):
+        return []
+
     node_coords: dict[int, tuple[float, float]] = {}
     for el in elements:
-        if el.get("type") == "node" and "lat" in el and "lon" in el:
-            node_coords[int(el["id"])] = (float(el["lat"]), float(el["lon"]))
+        if not isinstance(el, dict):
+            continue
+        if el.get("type") != "node" or "lat" not in el or "lon" not in el:
+            continue
+        try:
+            node_id = int(el["id"])
+            node_coords[node_id] = (float(el["lat"]), float(el["lon"]))
+        except (KeyError, TypeError, ValueError):
+            continue
 
     edges: list[dict] = []
     for el in elements:
+        if not isinstance(el, dict):
+            continue
         if el.get("type") != "way":
             continue
         nodes = el.get("nodes", [])
+        if not isinstance(nodes, list):
+            continue
         for idx in range(len(nodes) - 1):
-            n1 = int(nodes[idx])
-            n2 = int(nodes[idx + 1])
+            try:
+                n1 = int(nodes[idx])
+                n2 = int(nodes[idx + 1])
+            except (TypeError, ValueError):
+                continue
             if n1 not in node_coords or n2 not in node_coords:
                 continue
             lat1, lon1 = node_coords[n1]
