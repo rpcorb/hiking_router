@@ -222,25 +222,17 @@ def generate_top_loops(query: dict) -> dict:
             gain_per_mile_ft=metrics["gain_per_mile_ft"],
             difficulty=query.get("difficulty", "unknown"),
         )
-        score = composite_score(
-            distance_fit=distance_fit,
-            difficulty_fit=difficulty_fit,
-            terrain_fit=max(
-                0.3,
-                scenic_score(
-                    ridge_fraction=ridge_frac,
-                    summit_proximity_min_m=summit_proximity,
-                    elevation_gain_per_mile_ft=metrics["gain_per_mile_ft"],
-                    cfg=scenic_cfg,
-                ),
-            ),
-            penalties=grade_penalty,
-        )
         scenic_value = scenic_score(
             ridge_fraction=ridge_frac,
             summit_proximity_min_m=summit_proximity,
             elevation_gain_per_mile_ft=metrics["gain_per_mile_ft"],
             cfg=scenic_cfg,
+        )
+        score = composite_score(
+            distance_fit=distance_fit,
+            difficulty_fit=difficulty_fit,
+            terrain_fit=max(0.3, scenic_value),
+            penalties=grade_penalty,
         )
         routes.append(
             {
