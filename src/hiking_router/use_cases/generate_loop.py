@@ -28,6 +28,7 @@ from hiking_router.scoring.composite import difficulty_fit_score
 from hiking_router.scoring.composite import distance_fit_score
 from hiking_router.scoring.composite import sustained_grade_penalty
 from hiking_router.scoring.scenic import scenic_score
+from hiking_router.search.beam_loop_search import synthesize_loops_with_beam
 from hiking_router.search.diversity import select_diverse_loops
 from hiking_router.search.loop_search import filter_loops_by_distance_band, find_loops
 
@@ -179,7 +180,16 @@ def generate_top_loops(query: dict) -> dict:
     lengths: dict[tuple[str, ...], float] = {}
     if graph.number_of_nodes() > 0:
         start = next(iter(graph.nodes))
-        loops = find_loops(graph, start=start, max_loops=50)
+        loops = synthesize_loops_with_beam(
+            graph=graph,
+            start=start,
+            beam_width=20,
+            max_expansions=200,
+            max_depth=12,
+            max_candidates=50,
+        )
+        if not loops:
+            loops = find_loops(graph, start=start, max_loops=50)
         for loop in loops:
             lengths[tuple(loop)] = _loop_length_miles(loop, edge_lengths_m)
 
