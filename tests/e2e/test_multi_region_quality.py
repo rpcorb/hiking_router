@@ -46,3 +46,18 @@ def test_multi_region_quality_distance_fit_on_two_fixtures(tmp_path, monkeypatch
     assert 2.0 <= second["routes"][0]["distance_miles"] <= 3.5
     assert second["routes"][0]["score"] >= 0.0
 
+
+def test_multi_region_quality_returns_ranked_routes_for_small_cached_fixture(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("HIKING_ROUTER_CACHE_DIR", str(tmp_path))
+    osm_path = tmp_path / "raw" / "osm" / "z10-290-391.geojson"
+    _write_cycle_osm(osm_path, lat=35.0, lon=-82.0, delta=0.002)
+    _seed_non_network_sources(tmp_path)
+
+    payload = generate_top_loops(
+        {"near": "Asheville, NC", "miles_min": 0.2, "miles_max": 1.0, "difficulty": "moderate"}
+    )
+
+    assert payload["routes"]
+    assert payload["routes"][0]["score"] >= 0.0
