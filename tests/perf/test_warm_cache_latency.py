@@ -70,3 +70,23 @@ def test_scenic_score_called_once_per_route(tmp_path, monkeypatch):
     )
 
     assert call_count["count"] == len(payload["routes"])
+
+
+def test_warm_cache_query_with_beam_search_stays_under_budget(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIKING_ROUTER_CACHE_DIR", str(tmp_path))
+    _seed_cache(tmp_path)
+
+    query = {
+        "near": "Roanoke, VA",
+        "miles_min": 0.1,
+        "miles_max": 1.0,
+        "difficulty": "moderate",
+    }
+    _ = generate_loop_module.generate_top_loops(query)
+
+    start = time.perf_counter()
+    payload = generate_loop_module.generate_top_loops(query)
+    elapsed = time.perf_counter() - start
+
+    assert payload["routes"]
+    assert elapsed < 0.35
